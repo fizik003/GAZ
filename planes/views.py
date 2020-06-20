@@ -244,47 +244,9 @@ class DeletedContracts(View):
 
 
 def test(request):
-    months = [
-        "jan",
-        "feb",
-        "mar",
-        "apr",
-        "may",
-        "jun",
-        "jul",
-        "aug",
-        "sep",
-        "oct",
-        "nov",
-        "dec",
-    ]
 
-    contract = Contract.objects.latest('id')
-    sum_b = SumsBYN.objects.filter(contract=contract)
-    contract_form = ContractForm(instance=contract)
-    SumBYNFormSet = modelformset_factory(SumsBYN, SumsBYNForm, extra=1)  # Берет ИЗ БД
 
-    formset = SumBYNFormSet(queryset=SumsBYN.objects.all(),
-                            initial=[])
-    for form in formset:
-        # form.fields['period'].widget.attrs['hidden'] = True
-        # form.fields['period'].label = 'rewqrqre'
-        if form['period'].value() in months:
-            form.fields['period'].label = 'qq'  # TODO this line dont work in IF but works alone. waaaat
-            form.fields['plan_sum_SAP'].widget.attrs['hidden'] = True
-            form.fields['contract_sum_without_NDS_BYN'].widget.attrs['hidden'] = True
-            form.fields['economy_total'].widget.attrs['hidden'] = True
-            form.fields['economy_total'].label = ''
-            form.fields['contract_sum_without_NDS_BYN'].label = ''
-            form.fields['plan_sum_SAP'].label = ''
-
-    if request.user.groups.filter(name='spec_ASEZ'):
-        return HttpResponse('spec_ASEZ')
-
-    return render(request, template_name='contracts/test.html', context={'contract':contract,
-                                                                         'sum_b':sum_b,
-                                                                         'contract_form':contract_form,
-                                                                         'formset':formset})
+    return render(request, template_name='contracts/test.html', context={})
 
 
 def double_formset(request):
@@ -341,6 +303,7 @@ class ContractFabric(View):
         "3quart",
         "4quart",
     ]
+    # all_fields_contract = [getattr(i, 'name') for i in Contract._meta.fields].remove('id')
 
     def get(self, request, contract_id=None):
         if request.GET.__contains__('from_ajax'):
@@ -351,6 +314,11 @@ class ContractFabric(View):
 
         if request.GET.__contains__('pattern_contract_id'):
             contract_id = int(request.GET['pattern_contract_id'])
+
+        contract_mode_flag = False
+        finance_cost_flag = False
+        activity_form_flag = False
+        cant_do_this = []
 
         if not contract_id:
             ''' Create new contract with initial sumBYN and sumRUR'''
@@ -373,7 +341,6 @@ class ContractFabric(View):
                 pass
 
         else:
-            user_groups = request.user.groups
             SumBYNFormSet_months = modelformset_factory(SumsBYN, SumsBYNForm_months, extra=0)  # Берет ИЗ БД
             SumBYNFormSet_quarts = modelformset_factory(SumsBYN, SumsBYNForm_quarts, extra=0)
 
@@ -394,15 +361,93 @@ class ContractFabric(View):
             contract_form = ContractForm(instance=get_object_or_404(Contract, id=contract_id))
             sum_rur_form = SumsRURForm(instance=get_object_or_404(SumsRUR, contract__id=contract_id))
 
-        # if request.user.groups.filter(name='lawyers').exists():  # if in group - get permission for fields
-        #     for form in formset_months:
-        #         form.fields['forecast_total'].widget.attrs['contenteditable'] = False
-        # else:
-        #     return HttpResponse('not laweyr')
+            ''' readonly field for everyone '''
+            sum_byn_year_form.fields['contract_sum_without_NDS_BYN'].widget.attrs['readonly'] = 'readonly'
+
+            contract_mode_flag = False
+            finance_cost_flag = False
+            activity_form_flag = False
+
+            block_list = [getattr(i, 'name') for i in Contract._meta.fields]
+
+            user_groups = request.user.groups.all()
+
+            user_rights = {}
+            user_rights['lawyers'] = [
+                'id',  # id need course you can create new or etc
+                'contract_mode',
+                'number_ppz',
+                'contract_status',
+                'register_number_SAP',
+                'contract_number',
+                'fact_sign_date',
+                'start_date',
+                'end_time',
+                'counterpart',
+                'related_contract'
+            ]
+            user_rights['economists'] = [
+                'id',
+                'finance_cost',
+                'activity_form',
+            ]
+            user_rights['spec_ASEZ'] = [
+                'id',
+                'purchase_type',
+                'number_ppz',
+                'number_PZTRU',
+                'stateASEZ',
+                'plan_load_date_ASEZ',
+                'fact_load_date_ASEZ',
+                'currency',
+                'number_KGG',
+            ]
+
+            this_user_in_groups = [i.name for i in user_groups]
+            this_user_can_do = []
+            for i in this_user_in_groups:
+
+                this_user_can_do.extend(user_rights[i])
+
+            this_user_can_do = set(this_user_can_do)
+
+            this_user_cant_do = [i for i in block_list if i not in this_user_can_do]
+            if 'id' in this_user_cant_do:
+                this_user_cant_do.remove('id')
+
+            for right in this_user_cant_do:
+                dic = {}
+                contract_form.fields[right].widget.attrs['disabled'] = 'disabled'
+                attribute = getattr(Contract.objects.get(id=contract_id), right)
+                # TODO check if class is not FK then do any
+                dic['name'] = right
+
+                try:
+                    dic['value'] = attribute.id
+                except:
+                    try:
+                        dic['value'] = attribute.isoformat()
+                    except:
+                        dic['value'] = attribute
+                cant_do_this.append(dic)
+
+            if not request.user.groups.filter(name='economists').exists():
+                for form in formset_quarts:  # make fields readonly
+                    form.fields['plan_sum_SAP'].widget.attrs['readonly'] = 'readonly'
+                    form.fields['contract_sum_without_NDS_BYN'].widget.attrs['readonly'] = 'readonly'
+                for form in formset_months:  # make fields readonly
+                    form.fields['forecast_total'].widget.attrs['readonly'] = 'readonly'
+                    form.fields['fact_total'].widget.attrs['readonly'] = 'readonly'
+                sum_byn_year_form.fields['contract_sum_with_NDS_BYN'].widget.attrs['readonly'] = 'readonly'
 
         return render(request,
                       template_name=self.create_or_add,
                       context={
+                          'contract_mode_flag':contract_mode_flag,
+                          'finance_cost_flag':finance_cost_flag,
+                          'activity_form_flag':activity_form_flag,
+                          'cant_do_this':cant_do_this,
+
                           'formset_months':formset_months,
                           'formset_quarts':formset_quarts,
                           'sum_byn_year_form': sum_byn_year_form,
@@ -436,7 +481,6 @@ class ContractFabric(View):
         formset_months = SumBYNFormSet_months(request.POST, prefix='months')
         formset_quarts = SumBYNFormSet_quarts(request.POST, prefix='quarts')
 
-
         if sum_rur_form.is_valid() \
                 and contract_form.is_valid() \
                 and sum_byn_year_form.is_valid() \
@@ -463,9 +507,14 @@ class ContractFabric(View):
             new_sum_rur.save()
             return redirect(reverse('planes:contracts'))
         else:
-            print(sum_byn_year_form.errors, formset_quarts.errors, formset_months.errors)
-            return HttpResponse(sum_byn_year_form.errors, formset_quarts.errors, formset_months.errors)
+            print( sum_rur_form.is_valid(),
+                   contract_form.is_valid(),
+                   sum_byn_year_form.is_valid(),
+                   formset_months.is_valid(),
+                   formset_quarts.is_valid())
 
+            return HttpResponse(sum_byn_year_form.errors, formset_quarts.errors, formset_months.errors)
+            # TODO
 
 def adding_click_to_UserActivityJournal(request):
      counter = UserActivityJournal.objects.get(user=request.user)
