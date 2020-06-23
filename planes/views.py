@@ -390,6 +390,9 @@ class ContractFabric(View):
                 'id',
                 'finance_cost',
                 'activity_form',
+
+                'related_contract'  # TODO del it
+
             ]
             user_rights['spec_ASEZ'] = [
                 'id',
@@ -401,6 +404,8 @@ class ContractFabric(View):
                 'fact_load_date_ASEZ',
                 'currency',
                 'number_KGG',
+
+                'related_contract'  # TODO del it
             ]
 
             this_user_in_groups = [i.name for i in user_groups]
